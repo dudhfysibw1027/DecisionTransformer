@@ -26,8 +26,8 @@ class SequenceTrainer(Trainer):
         reward_target = reward_target[:, 0:t-1, :]
 
         loss = self.loss_fn(
-            None, action_preds, reward_preds,
-            None, action_target, reward_target,
+            None, action_preds, None,
+            None, action_target, None,
         )
         # print(reward_target[:, t, :])
         # print(self.batch_size, " ", print(reward_preds.shape))

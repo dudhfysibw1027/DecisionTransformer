@@ -14,7 +14,8 @@ from decision_transformer.models.decision_transformer import DecisionTransformer
 from decision_transformer.models.mlp_bc import MLPBCModel
 from decision_transformer.training.act_trainer import ActTrainer
 from decision_transformer.training.seq_trainer import SequenceTrainer
-
+from decision_transformer.training.actor_critic_trainer import ActorCriticTrainer
+from decision_transformer.models.actor_critic_transformer import ActorCriticTransformer
 
 def discount_cumsum(x, gamma):
     discount_cumsum = np.zeros_like(x)
@@ -282,6 +283,22 @@ def experiment(
             hidden_size=variant['embed_dim'],
             n_layer=variant['n_layer'],
         )
+    elif model_type == 'ac':
+        model = ActorCriticTransformer(
+            state_dim=state_dim,
+            act_dim=act_dim,
+            max_length=K,
+            max_ep_len=max_ep_len,
+            hidden_size=variant['embed_dim'],
+            n_layer=variant['n_layer'],
+            n_head=variant['n_head'],
+            n_inner=4*variant['embed_dim'],
+            activation_function=variant['activation_function'],
+            n_positions=1024,
+            resid_pdrop=variant['dropout'],
+            attn_pdrop=variant['dropout'],
+        )
+
     else:
         raise NotImplementedError
 
@@ -295,24 +312,62 @@ def experiment(
     )
     scheduler = torch.optim.lr_scheduler.LambdaLR(
         optimizer,
-        lambda steps: min((steps+1)/warmup_steps, 1)
+        lambda steps: min((steps + 1) / warmup_steps, 1)
     )
-    critic_params = []
-    for name, param in model.named_parameters():
-        if name == 'predict_action.0.weight':
-            pass
-        elif name == 'predict_action.0.bias':
-            pass
-        elif name == 'predict_state.weight':
-            pass
-        elif name == 'predict_state.bias':
-            pass
-        else:
-            critic_params.append(param)
-        print(name, param.shape)
-
+    # actor_params = []
+    # for name, param in model.named_parameters():
+    #     # if name == 'predict_action.0.weight':
+    #     #     pass
+    #     # elif name == 'predict_action.0.bias':
+    #     #     pass
+    #     # elif name == 'predict_state.weight':
+    #     #     pass
+    #     # elif name == 'predict_state.bias':
+    #     #     pass
+    #     # else:
+    #     actor_params.append(param)
+    # actor_optimizer = torch.optim.AdamW(
+    #     model.parameters(),
+    #     lr=variant['learning_rate'],
+    #     weight_decay=variant['weight_decay'],
+    # )
+    # actor_scheduler = torch.optim.lr_scheduler.LambdaLR(
+    #     actor_optimizer,
+    #     lambda steps: min((steps + 1) / warmup_steps, 1)
+    # )
+    # critic_params = []
+    # for name, param in model.named_parameters():
+    #     if name == 'predict_return.weight':
+    #         pass
+    #     elif name == 'predict_return.bias':
+    #         pass
+    #     elif name == 'predict_state.weight':
+    #         pass
+    #     elif name == 'predict_state.bias':
+    #         pass
+    #     else:
+    #         critic_params.append(param)
+    # critic_optimizer = torch.optim.AdamW(
+    #     critic_params,
+    #     lr=variant['learning_rate'],
+    #     weight_decay=variant['weight_decay'],
+    # )
+    # critic_scheduler = torch.optim.lr_scheduler.LambdaLR(
+    #     critic_optimizer,
+    #     lambda steps: min((steps + 1) / warmup_steps, 1)
+    # )
     if model_type == 'dt':
         trainer = SequenceTrainer(
+            model=model,
+            optimizer=optimizer,
+            batch_size=batch_size,
+            get_batch=get_batch,
+            scheduler=scheduler,
+            loss_fn=lambda s_hat, a_hat, r_hat, s, a, r: torch.mean((a_hat - a)**2) + torch.mean((r_hat - r)**2),
+            eval_fns=[eval_episodes(tar) for tar in env_targets],
+        )
+    elif model_type == 'bc':
+        trainer = ActTrainer(
             model=model,
             optimizer=optimizer,
             batch_size=batch_size,
@@ -321,8 +376,8 @@ def experiment(
             loss_fn=lambda s_hat, a_hat, r_hat, s, a, r: torch.mean((a_hat - a)**2),
             eval_fns=[eval_episodes(tar) for tar in env_targets],
         )
-    elif model_type == 'bc':
-        trainer = ActTrainer(
+    elif model_type == 'ac':
+        trainer = ActorCriticTrainer(
             model=model,
             optimizer=optimizer,
             batch_size=batch_size,
@@ -355,7 +410,7 @@ if __name__ == '__main__':
     parser.add_argument('--K', type=int, default=20)
     parser.add_argument('--pct_traj', type=float, default=1.)
     parser.add_argument('--batch_size', type=int, default=64)
-    parser.add_argument('--model_type', type=str, default='dt')  # dt for decision transformer, bc for behavior cloning
+    parser.add_argument('--model_type', type=str, default='ac')  # dt for decision transformer, bc for behavior cloning
     parser.add_argument('--embed_dim', type=int, default=128)
     parser.add_argument('--n_layer', type=int, default=3)
     parser.add_argument('--n_head', type=int, default=1)
