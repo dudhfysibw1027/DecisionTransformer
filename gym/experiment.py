@@ -1,4 +1,5 @@
 import gym
+import minari
 import numpy as np
 import torch
 import wandb
@@ -33,8 +34,6 @@ def experiment(
     env_name, dataset = variant['env'], variant['dataset']
     model_type = variant['model_type']
     group_name = f'{exp_prefix}-{env_name}-{dataset}'
-    exp_prefix = f'{group_name}-{random.randint(int(1e5), int(1e6) - 1)}'
-
     if env_name == 'hopper':
         env = gym.make('Hopper-v3')
         max_ep_len = 1000
@@ -56,8 +55,61 @@ def experiment(
         max_ep_len = 100
         env_targets = [76, 40]
         scale = 10.
+    elif env_name == "door":
+        if dataset == 'human':
+            env_targets = [1600, 800]
+        elif dataset == 'expert':
+            env_targets = [1600, 3000]
+        elif dataset == 'cloned':
+            env_targets = [300, 800, 1500]
+        import gymnasium as gym
+        max_ep_len = 200
+        env = gym.make('AdroitHandDoor-v1', max_episode_steps=max_ep_len)
+        scale = 10.
+    elif env_name == "relocate":
+        if dataset == 'human':
+            env_targets = [80, 120]
+            max_ep_len = 400
+        elif dataset == 'expert':
+            env_targets = [4300, 3500]
+            max_ep_len = 200
+        elif dataset == 'cloned':
+            env_targets = [10, 80]
+            max_ep_len = 200
+        import gymnasium as gym
+        env = gym.make('AdroitHandRelocate-v1', max_episode_steps=max_ep_len)
+        scale = 200.
+    elif env_name == "hammer":
+        if dataset == 'human':
+            env_targets = [5000, 3500]
+        elif dataset == 'expert':
+            env_targets = [1600, 3000]
+        elif dataset == 'cloned':
+            env_targets = [800, 400]
+        import gymnasium as gym
+        max_ep_len = 400
+        env = gym.make('AdroitHandHammer-v1', max_episode_steps=max_ep_len)
+        scale = 100.
+    elif env_name == "pen":
+        if dataset == 'human':
+            env_targets = [5000, 3500]
+        elif dataset == 'expert':
+            env_targets = [1600, 3000]
+        elif dataset == 'cloned':
+            env_targets = [800, 1200, 3000]
+        import gymnasium as gym
+        max_ep_len = 400
+        env = gym.make('AdroitHandPen-v1', max_episode_steps=max_ep_len)
+        scale = 10.
     else:
+        # minari_dataset = minari.load_dataset('relocate-human-v2')
+        # minari_dataset = minari.load_dataset('relocate-expert-v2')
+        # minari_dataset = minari.load_dataset('relocate-cloned-v2')
+        # env = minari_dataset.recover_environment()
+
         raise NotImplementedError
+
+    exp_prefix = f'{group_name}-' + str(env_targets) + '-scale_' + str(int(scale))
 
     if model_type == 'bc':
         env_targets = env_targets[:1]  # since BC ignores target, no need for different evaluations
@@ -67,6 +119,7 @@ def experiment(
 
     # load dataset
     dataset_path = f'data/{env_name}-{dataset}-v2.pkl'
+    print(dataset_path)
     with open(dataset_path, 'rb') as f:
         trajectories = pickle.load(f)
 
@@ -141,6 +194,7 @@ def experiment(
             rtg.append(discount_cumsum(traj['rewards'][si:], gamma=1.)[:s[-1].shape[1] + 1].reshape(1, -1, 1))
             if rtg[-1].shape[1] <= s[-1].shape[1]:
                 rtg[-1] = np.concatenate([rtg[-1], np.zeros((1, 1, 1))], axis=1)
+                pass
 
             # padding and state + reward normalization
             tlen = s[-1].shape[1]
@@ -251,7 +305,7 @@ def experiment(
             batch_size=batch_size,
             get_batch=get_batch,
             scheduler=scheduler,
-            loss_fn=lambda s_hat, a_hat, r_hat, s, a, r: torch.mean((a_hat - a)**2),
+            loss_fn=lambda s_hat, a_hat, r_hat, s, a, r: torch.mean((a_hat - a)**2) + torch.mean((r_hat - r)**2),
             eval_fns=[eval_episodes(tar) for tar in env_targets],
         )
     elif model_type == 'bc':
@@ -282,8 +336,8 @@ def experiment(
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env', type=str, default='hopper')
-    parser.add_argument('--dataset', type=str, default='medium')  # medium, medium-replay, medium-expert, expert
+    parser.add_argument('--env', type=str, default='relocate')
+    parser.add_argument('--dataset', type=str, default='human')  # medium, medium-replay, medium-expert, expert
     parser.add_argument('--mode', type=str, default='normal')  # normal for standard setting, delayed for sparse
     parser.add_argument('--K', type=int, default=20)
     parser.add_argument('--pct_traj', type=float, default=1.)
