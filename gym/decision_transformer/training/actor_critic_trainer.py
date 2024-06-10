@@ -17,10 +17,9 @@ class ActorCriticTrainer(Trainer):
         # get masked action from gaussian actor
         mean_preds, std_preds = action_preds
         act_dim = mean_preds.shape[2]
-        # action_preds = action_preds.reshape(-1, act_dim)[attention_mask.reshape(-1) > 0]
-        mean_preds = mean_preds.reshape(-1, act_dim)[attention_mask.reshape(-1) > 0]
-        std_preds = std_preds.reshape(-1, act_dim)[attention_mask.reshape(-1) > 0]
-        action_target = action_target.reshape(-1, act_dim)[attention_mask.reshape(-1) > 0]
+        mean_preds = mean_preds.reshape(-1, act_dim)
+        std_preds = std_preds.reshape(-1, act_dim)
+        action_target = action_target.reshape(-1, act_dim)
 
         # get return-to-go
         batch_size, t, _ = reward_target.shape
@@ -31,22 +30,8 @@ class ActorCriticTrainer(Trainer):
 
         # get action
         action_dist = torch.distributions.Normal(mean_preds, std_preds)
-        action_log_probs = action_dist.log_prob(action_target).sum(-1, keepdim=True)
+        action_log_probs = action_dist.log_prob(action_target).sum(-1, keepdim=True)[attention_mask.reshape(-1) > 0]
         action_entropy = action_dist.entropy().sum(-1, keepdim=True)
-
-        # actor update
-        # self.optimizer.zero_grad()
-        # actor_loss = - (action_log_probs * (reward_target - reward_preds.detach())).mean() - 0.01 * action_entropy.mean()
-        # actor_loss.backward(retain_graph=True)
-        # torch.nn.utils.clip_grad_norm_(self.model.parameters(), .25)
-        # self.optimizer.step()
-
-        # critic update
-        # self.critic_optimizer.zero_grad()
-        # critic_loss = torch.nn.functional.mse_loss(reward_preds, reward_target)
-        # critic_loss.backward()
-        # torch.nn.utils.clip_grad_norm_(self.model.predict_return.parameters(), .25)
-        # self.critic_optimizer.step()
 
         # actor and critic update
         self.optimizer.zero_grad()

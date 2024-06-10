@@ -297,19 +297,19 @@ def experiment(
         optimizer,
         lambda steps: min((steps+1)/warmup_steps, 1)
     )
-    critic_params = []
-    for name, param in model.named_parameters():
-        if name == 'predict_action.0.weight':
-            pass
-        elif name == 'predict_action.0.bias':
-            pass
-        elif name == 'predict_state.weight':
-            pass
-        elif name == 'predict_state.bias':
-            pass
-        else:
-            critic_params.append(param)
-        print(name, param.shape)
+    # critic_params = []
+    # for name, param in model.named_parameters():
+    #     if name == 'predict_action.0.weight':
+    #         pass
+    #     elif name == 'predict_action.0.bias':
+    #         pass
+    #     elif name == 'predict_state.weight':
+    #         pass
+    #     elif name == 'predict_state.bias':
+    #         pass
+    #     else:
+    #         critic_params.append(param)
+    #     print(name, param.shape)
 
     if model_type == 'dt':
         trainer = SequenceTrainer(
