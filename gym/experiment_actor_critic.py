@@ -237,6 +237,20 @@ def experiment(
                             state_std=state_std,
                             device=device,
                         )
+                    elif model_type == 'ac':
+                        ret, length = evaluate_episode_rtg(
+                            env,
+                            state_dim,
+                            act_dim,
+                            model,
+                            max_ep_len=max_ep_len,
+                            scale=scale,
+                            target_return=target_rew/scale,
+                            mode=mode,
+                            state_mean=state_mean,
+                            state_std=state_std,
+                            device=device,
+                        )
                     else:
                         ret, length = evaluate_episode(
                             env,
