@@ -15,6 +15,7 @@ from decision_transformer.models.mlp_bc import MLPBCModel
 from decision_transformer.training.act_trainer import ActTrainer
 from decision_transformer.training.seq_trainer import SequenceTrainer
 from decision_transformer.training.actor_critic_trainer import ActorCriticTrainer
+from decision_transformer.training.conservative_actor_critic_trainer import ConservativeActorCriticTrainer
 from decision_transformer.models.actor_critic_transformer import ActorCriticTransformer
 
 def discount_cumsum(x, gamma):
@@ -38,7 +39,7 @@ def experiment(
     if env_name == 'hopper':
         env = gym.make('Hopper-v3')
         max_ep_len = 1000
-        env_targets = [3600, 1800]  # evaluation conditioning targets
+        env_targets = [1800, 3600]  # evaluation conditioning targets
         scale = 1000.  # normalization for rewards/returns
     elif env_name == 'halfcheetah':
         env = gym.make('HalfCheetah-v3')
@@ -63,9 +64,9 @@ def experiment(
             env_targets = [1600, 3000]
         elif dataset == 'cloned':
             env_targets = [300, 800, 1500]
-        import gymnasium as gym
+        import gymnasium as gymn
         max_ep_len = 200
-        env = gym.make('AdroitHandDoor-v1', max_episode_steps=max_ep_len)
+        env = gymn.make('AdroitHandDoor-v1', max_episode_steps=max_ep_len)
         scale = 10.
     elif env_name == "relocate":
         if dataset == 'human':
@@ -77,8 +78,8 @@ def experiment(
         elif dataset == 'cloned':
             env_targets = [10, 80]
             max_ep_len = 200
-        import gymnasium as gym
-        env = gym.make('AdroitHandRelocate-v1', max_episode_steps=max_ep_len)
+        import gymnasium as gymn
+        env = gymn.make('AdroitHandRelocate-v1', max_episode_steps=max_ep_len)
         scale = 200.
     elif env_name == "hammer":
         if dataset == 'human':
@@ -87,9 +88,9 @@ def experiment(
             env_targets = [1600, 3000]
         elif dataset == 'cloned':
             env_targets = [800, 400]
-        import gymnasium as gym
+        import gymnasium as gymn
         max_ep_len = 400
-        env = gym.make('AdroitHandHammer-v1', max_episode_steps=max_ep_len)
+        env = gymn.make('AdroitHandHammer-v1', max_episode_steps=max_ep_len)
         scale = 100.
     elif env_name == "pen":
         if dataset == 'human':
@@ -98,9 +99,9 @@ def experiment(
             env_targets = [1600, 3000]
         elif dataset == 'cloned':
             env_targets = [800, 1200, 3000]
-        import gymnasium as gym
+        import gymnasium as gymn
         max_ep_len = 400
-        env = gym.make('AdroitHandPen-v1', max_episode_steps=max_ep_len)
+        env = gymn.make('AdroitHandPen-v1', max_episode_steps=max_ep_len)
         scale = 10.
     else:
         # minari_dataset = minari.load_dataset('relocate-human-v2')
@@ -251,6 +252,20 @@ def experiment(
                             state_std=state_std,
                             device=device,
                         )
+                    elif model_type == 'cac':
+                        ret, length = evaluate_episode_rtg(
+                            env,
+                            state_dim,
+                            act_dim,
+                            model,
+                            max_ep_len=max_ep_len,
+                            scale=scale,
+                            target_return=target_rew/scale,
+                            mode=mode,
+                            state_mean=state_mean,
+                            state_std=state_std,
+                            device=device,
+                        )
                     else:
                         ret, length = evaluate_episode(
                             env,
@@ -298,6 +313,21 @@ def experiment(
             n_layer=variant['n_layer'],
         )
     elif model_type == 'ac':
+        model = ActorCriticTransformer(
+            state_dim=state_dim,
+            act_dim=act_dim,
+            max_length=K,
+            max_ep_len=max_ep_len,
+            hidden_size=variant['embed_dim'],
+            n_layer=variant['n_layer'],
+            n_head=variant['n_head'],
+            n_inner=4*variant['embed_dim'],
+            activation_function=variant['activation_function'],
+            n_positions=1024,
+            resid_pdrop=variant['dropout'],
+            attn_pdrop=variant['dropout'],
+        )
+    elif model_type == 'cac':
         model = ActorCriticTransformer(
             state_dim=state_dim,
             act_dim=act_dim,
@@ -400,6 +430,17 @@ def experiment(
             loss_fn=lambda s_hat, a_hat, r_hat, s, a, r: torch.mean((a_hat - a)**2),
             eval_fns=[eval_episodes(tar) for tar in env_targets],
         )
+    elif model_type == 'cac':
+        trainer = ConservativeActorCriticTrainer(
+            model=model,
+            optimizer=optimizer,
+            batch_size=batch_size,
+            get_batch=get_batch,
+            scheduler=scheduler,
+            loss_fn=lambda s_hat, a_hat, r_hat, s, a, r: torch.mean((a_hat - a)**2),
+            eval_fns=[eval_episodes(tar) for tar in env_targets],
+        )
+    
 
     if log_to_wandb:
         wandb.init(
