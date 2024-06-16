@@ -15,8 +15,10 @@ from decision_transformer.models.mlp_bc import MLPBCModel
 from decision_transformer.training.act_trainer import ActTrainer
 from decision_transformer.training.seq_trainer import SequenceTrainer
 from decision_transformer.training.actor_critic_trainer import ActorCriticTrainer
+from decision_transformer.training.seperate_actor_critic_trainer import SeperateActorCriticTrainer
 from decision_transformer.training.conservative_actor_critic_trainer import ConservativeActorCriticTrainer
 from decision_transformer.models.actor_critic_transformer import ActorCriticTransformer
+from decision_transformer.models.actor_mlp import Actor
 
 def discount_cumsum(x, gamma):
     discount_cumsum = np.zeros_like(x)
@@ -39,7 +41,7 @@ def experiment(
     if env_name == 'hopper':
         env = gym.make('Hopper-v3')
         max_ep_len = 1000
-        env_targets = [1800, 3600]  # evaluation conditioning targets
+        env_targets = [1800]  # evaluation conditioning targets
         scale = 1000.  # normalization for rewards/returns
     elif env_name == 'halfcheetah':
         env = gym.make('HalfCheetah-v3')
@@ -59,50 +61,52 @@ def experiment(
         scale = 10.
     elif env_name == "door":
         if dataset == 'human':
-            env_targets = [1600, 800]
+            env_targets = [1500]
+            scale = 10.
         elif dataset == 'expert':
-            env_targets = [1600, 3000]
+            env_targets = [3000]
+            scale = 100.
         elif dataset == 'cloned':
-            env_targets = [300, 800, 1500]
+            env_targets = [1500]
+            scale = 100.
         import gymnasium as gymn
         max_ep_len = 200
         env = gymn.make('AdroitHandDoor-v1', max_episode_steps=max_ep_len)
-        scale = 10.
     elif env_name == "relocate":
         if dataset == 'human':
-            env_targets = [400, 800]
-            max_ep_len = 400
+            env_targets = [800]
+            max_ep_len = 200
         elif dataset == 'expert':
-            env_targets = [4300, 3500]
+            env_targets = [5000]
             max_ep_len = 200
         elif dataset == 'cloned':
-            env_targets = [10, 80]
+            env_targets = [100]
             max_ep_len = 200
         import gymnasium as gymn
         env = gymn.make('AdroitHandRelocate-v1', max_episode_steps=max_ep_len)
-        scale = 200.
+        scale = 10.
     elif env_name == "hammer":
         if dataset == 'human':
-            env_targets = [5000, 3500]
+            env_targets = [3000]
         elif dataset == 'expert':
-            env_targets = [1600, 3000]
+            env_targets = [3000]
         elif dataset == 'cloned':
-            env_targets = [800, 400]
+            env_targets = [300]
         import gymnasium as gymn
-        max_ep_len = 400
+        max_ep_len = 200
         env = gymn.make('AdroitHandHammer-v1', max_episode_steps=max_ep_len)
-        scale = 100.
+        scale = 10.
     elif env_name == "pen":
         if dataset == 'human':
-            env_targets = [5000, 3500]
+            env_targets = [1700]
         elif dataset == 'expert':
-            env_targets = [1600, 3000]
+            env_targets = [1700]
         elif dataset == 'cloned':
-            env_targets = [800, 1200, 3000]
+            env_targets = [3400]
         import gymnasium as gymn
-        max_ep_len = 400
+        max_ep_len = 100
         env = gymn.make('AdroitHandPen-v1', max_episode_steps=max_ep_len)
-        scale = 10.
+        scale = 100.
     else:
         # minari_dataset = minari.load_dataset('relocate-human-v2')
         # minari_dataset = minari.load_dataset('relocate-expert-v2')
@@ -266,6 +270,20 @@ def experiment(
                             state_std=state_std,
                             device=device,
                         )
+                    elif model_type == 'sac':
+                        ret, length = evaluate_episode_rtg(
+                            env,
+                            state_dim,
+                            act_dim,
+                            actor,
+                            max_ep_len=max_ep_len,
+                            scale=scale,
+                            target_return=target_rew/scale,
+                            mode=mode,
+                            state_mean=state_mean,
+                            state_std=state_std,
+                            device=device,
+                        )
                     else:
                         ret, length = evaluate_episode(
                             env,
@@ -342,15 +360,37 @@ def experiment(
             resid_pdrop=variant['dropout'],
             attn_pdrop=variant['dropout'],
         )
+    elif model_type == 'sac':
+        model = DecisionTransformer(
+            state_dim=state_dim,
+            act_dim=act_dim,
+            max_length=K,
+            max_ep_len=max_ep_len,
+            hidden_size=variant['embed_dim'],
+            n_layer=variant['n_layer'],
+            n_head=variant['n_head'],
+            n_inner=4*variant['embed_dim'],
+            activation_function=variant['activation_function'],
+            n_positions=1024,
+            resid_pdrop=variant['dropout'],
+            attn_pdrop=variant['dropout'],
+        )
 
     else:
         raise NotImplementedError
 
     model = model.to(device=device)
+    actor = Actor(state_dim, act_dim)
+    actor = actor.to(device=device)
 
     warmup_steps = variant['warmup_steps']
     optimizer = torch.optim.AdamW(
         model.parameters(),
+        lr=variant['learning_rate'],
+        weight_decay=variant['weight_decay'],
+    )
+    actor_optimizer = torch.optim.AdamW(
+        actor.parameters(),
         lr=variant['learning_rate'],
         weight_decay=variant['weight_decay'],
     )
@@ -440,6 +480,18 @@ def experiment(
             loss_fn=lambda s_hat, a_hat, r_hat, s, a, r: torch.mean((a_hat - a)**2),
             eval_fns=[eval_episodes(tar) for tar in env_targets],
         )
+    elif model_type == 'sac':
+        trainer = SeperateActorCriticTrainer(
+            model=model,
+            optimizer=optimizer,
+            batch_size=batch_size,
+            get_batch=get_batch,
+            scheduler=scheduler,
+            loss_fn=lambda s_hat, a_hat, r_hat, s, a, r: torch.mean((r_hat - r)**2),
+            actor=actor,
+            actor_opt=actor_optimizer,
+            eval_fns=[eval_episodes(tar) for tar in env_targets],
+        )
     
 
     if log_to_wandb:
@@ -476,7 +528,7 @@ if __name__ == '__main__':
     parser.add_argument('--warmup_steps', type=int, default=10000)
     parser.add_argument('--num_eval_episodes', type=int, default=100)
     parser.add_argument('--max_iters', type=int, default=10)
-    parser.add_argument('--num_steps_per_iter', type=int, default=10000)
+    parser.add_argument('--num_steps_per_iter', type=int, default=10000)#10000
     parser.add_argument('--device', type=str, default='cuda')
     parser.add_argument('--log_to_wandb', '-w', type=bool, default=False)
     

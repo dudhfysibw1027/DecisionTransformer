@@ -6,9 +6,14 @@ import time
 
 class Trainer:
 
-    def __init__(self, model, optimizer, batch_size, get_batch, loss_fn, scheduler=None, eval_fns=None):
+    def __init__(self, model, optimizer, batch_size, get_batch, loss_fn, actor=None, actor_opt=None, scheduler=None, eval_fns=None):
         self.model = model
         self.optimizer = optimizer
+        
+        # add actor optimizer
+        self.actor = actor
+        self.actor_opt = actor_opt
+
         self.batch_size = batch_size
         self.get_batch = get_batch
         self.loss_fn = loss_fn
@@ -19,7 +24,6 @@ class Trainer:
         self.start_time = time.time()
 
     def train_iteration(self, num_steps, iter_num=0, print_logs=False):
-
         train_losses = []
         logs = dict()
 
